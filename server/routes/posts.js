@@ -8,6 +8,7 @@ import {
   deletePost,
   addComment,
   deleteComment,
+  fixImageUrls
 } from "../controllers/posts.js";
 import { verifyToken } from "../middleware/auth.js";
 
@@ -26,15 +27,20 @@ router.get("/", verifyToken, getFeedPosts);
 // Получить посты пользователя с пагинацией
 router.get("/:userId/posts", verifyToken, getUserPosts);
 
-// Создать пост с несколькими картинками
-// Раньше было upload.array("pictures", 5)
+// Создать пост
 router.post("/", verifyToken, upload.single("picture"), createPost);
 
-
+// Лайк поста
 router.patch("/:id/like", verifyToken, likePost);
-router.patch("/:id/comment", verifyToken, addComment);
 
-router.delete("/:id", verifyToken, deletePost);
+// Комментарии
+router.patch("/:id/comment", verifyToken, addComment);
 router.delete("/:id/comments/:commentId", verifyToken, deleteComment);
+
+// Удаление поста
+router.delete("/:id", verifyToken, deletePost);
+
+// Фикс URL изображений (временный endpoint)
+router.patch("/fix/urls", verifyToken, fixImageUrls);
 
 export default router;

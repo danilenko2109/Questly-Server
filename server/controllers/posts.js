@@ -2,7 +2,7 @@ import Post from "../models/Post.js";
 import User from "../models/User.js";
 
 /**
- * Создание нового поста с возможностью загрузки нескольких изображений
+ * Создание нового поста с абсолютными URL изображений
  */
 export const createPost = async (req, res) => {
   try {
@@ -11,8 +11,15 @@ export const createPost = async (req, res) => {
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    // Одна картинка
-    const picturePath = req.file ? req.file.filename : null;
+    // Функция для создания абсолютного URL
+    const getFullUrl = (filename) => {
+      if (!filename) return null;
+      if (filename.startsWith('http')) return filename;
+      return `${req.protocol}://${req.get('host')}/assets/${filename}`;
+    };
+
+    const picturePath = req.file ? getFullUrl(req.file.filename) : null;
+    const userPicturePath = getFullUrl(user.picturePath);
 
     const newPost = new Post({
       userId,
@@ -20,46 +27,48 @@ export const createPost = async (req, res) => {
       lastName: user.lastName,
       location: user.location,
       description,
-      userPicturePath: user.picturePath,
-      picturePath, // одна картинка
+      userPicturePath,
+      picturePath,
       likes: {},
       comments: [],
     });
 
     await newPost.save();
-
     res.status(201).json(newPost.toObject());
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-
 /**
  * Получение ленты постов с пагинацией
- * Запрос: GET /posts?page=1&limit=10
  */
 export const getFeedPosts = async (req, res) => {
   try {
-    // Читаем параметры пагинации с дефолтами
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, parseInt(req.query.limit) || 10); // максимум 100
-
+    const limit = Math.min(100, parseInt(req.query.limit) || 10);
     const skip = (page - 1) * limit;
 
-    // Считаем общее количество постов
     const totalPosts = await Post.countDocuments();
-
-    // Забираем посты с сортировкой по дате создания (новые — сверху)
     const posts = await Post.find()
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean();
 
-    // Отправляем ответ с пагинацией
+    // Фиксим URL для существующих постов
+    const postsWithFixedUrls = posts.map(post => ({
+      ...post,
+      picturePath: post.picturePath && !post.picturePath.startsWith('http') 
+        ? `${req.protocol}://${req.get('host')}/assets/${post.picturePath}`
+        : post.picturePath,
+      userPicturePath: post.userPicturePath && !post.userPicturePath.startsWith('http')
+        ? `${req.protocol}://${req.get('host')}/assets/${post.userPicturePath}`
+        : post.userPicturePath
+    }));
+
     res.status(200).json({
-      posts,
+      posts: postsWithFixedUrls,
       currentPage: page,
       totalPages: Math.ceil(totalPosts / limit),
       totalPosts,
@@ -71,26 +80,34 @@ export const getFeedPosts = async (req, res) => {
 
 /**
  * Получение постов конкретного пользователя с пагинацией
- * Запрос: GET /:userId/posts?page=1&limit=10
  */
 export const getUserPosts = async (req, res) => {
   try {
     const { userId } = req.params;
-
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, parseInt(req.query.limit) || 10);
     const skip = (page - 1) * limit;
 
     const totalPosts = await Post.countDocuments({ userId });
-
     const posts = await Post.find({ userId })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean();
 
+    // Фиксим URL для существующих постов
+    const postsWithFixedUrls = posts.map(post => ({
+      ...post,
+      picturePath: post.picturePath && !post.picturePath.startsWith('http') 
+        ? `${req.protocol}://${req.get('host')}/assets/${post.picturePath}`
+        : post.picturePath,
+      userPicturePath: post.userPicturePath && !post.userPicturePath.startsWith('http')
+        ? `${req.protocol}://${req.get('host')}/assets/${post.userPicturePath}`
+        : post.userPicturePath
+    }));
+
     res.status(200).json({
-      posts,
+      posts: postsWithFixedUrls,
       currentPage: page,
       totalPages: Math.ceil(totalPosts / limit),
       totalPosts,
@@ -101,31 +118,24 @@ export const getUserPosts = async (req, res) => {
 };
 
 /**
- * Лайк/дизлайк поста (переключение)
- * PATCH /posts/:id/like
+ * Лайк/дизлайк поста
  */
 export const likePost = async (req, res) => {
   try {
-    const { id } = req.params;      // id поста
-    const { userId } = req.body;    // id пользователя, который лайкает
+    const { id } = req.params;
+    const { userId } = req.body;
 
-    // Находим пост
     const post = await Post.findById(id);
     if (!post) return res.status(404).json({ message: "Post not found" });
 
-    // Проверяем, есть ли лайк от пользователя
     const isLiked = post.likes.get(userId);
-
     if (isLiked) {
-      post.likes.delete(userId);  // убираем лайк
+      post.likes.delete(userId);
     } else {
-      post.likes.set(userId, true); // добавляем лайк
+      post.likes.set(userId, true);
     }
 
-    // Сохраняем изменения
     await post.save();
-
-    // Отправляем обновлённый пост
     res.status(200).json(post.toObject());
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -134,12 +144,11 @@ export const likePost = async (req, res) => {
 
 /**
  * Добавление комментария к посту
- * PATCH /posts/:id/comment
  */
 export const addComment = async (req, res) => {
   try {
-    const { id } = req.params;          // id поста
-    const { userId, text } = req.body;  // данные комментария
+    const { id } = req.params;
+    const { userId, text } = req.body;
 
     if (!text || text.trim() === "") {
       return res.status(400).json({ message: "Comment text is required" });
@@ -148,17 +157,22 @@ export const addComment = async (req, res) => {
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    // Создаём объект комментария
+    // Функция для создания абсолютного URL
+    const getFullUrl = (filename) => {
+      if (!filename) return null;
+      if (filename.startsWith('http')) return filename;
+      return `${req.protocol}://${req.get('host')}/assets/${filename}`;
+    };
+
     const newComment = {
       userId,
       userFirstName: user.firstName,
       userLastName: user.lastName,
-      userPicturePath: user.picturePath,
+      userPicturePath: getFullUrl(user.picturePath),
       text: text.trim(),
       createdAt: new Date(),
     };
 
-    // Добавляем комментарий в массив
     const updatedPost = await Post.findByIdAndUpdate(
       id,
       { $push: { comments: newComment } },
@@ -166,7 +180,6 @@ export const addComment = async (req, res) => {
     ).lean();
 
     if (!updatedPost) return res.status(404).json({ message: "Post not found" });
-
     res.status(200).json(updatedPost);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -174,8 +187,7 @@ export const addComment = async (req, res) => {
 };
 
 /**
- * Удаление комментария из поста
- * DELETE /posts/:id/comments/:commentId
+ * Удаление комментария
  */
 export const deleteComment = async (req, res) => {
   try {
@@ -188,18 +200,12 @@ export const deleteComment = async (req, res) => {
     const comment = post.comments.id(commentId);
     if (!comment) return res.status(404).json({ message: "Comment not found" });
 
-    // Проверяем права на удаление (автор комментария или автор поста)
-    if (
-      comment.userId.toString() !== userId &&
-      post.userId.toString() !== userId
-    ) {
+    if (comment.userId.toString() !== userId && post.userId.toString() !== userId) {
       return res.status(403).json({ message: "Not authorized to delete this comment" });
     }
 
-    // Удаляем комментарий
     comment.remove();
     await post.save();
-
     res.status(200).json(post.toObject());
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -208,7 +214,6 @@ export const deleteComment = async (req, res) => {
 
 /**
  * Удаление поста
- * DELETE /posts/:id
  */
 export const deletePost = async (req, res) => {
   try {
@@ -218,21 +223,40 @@ export const deletePost = async (req, res) => {
     const post = await Post.findById(id);
     if (!post) return res.status(404).json({ message: "Post not found" });
 
-    // Проверяем, что пользователь — автор поста
     if (post.userId.toString() !== userId) {
       return res.status(403).json({ message: "Not authorized to delete this post" });
     }
 
-    // Удаляем пост
     await Post.findByIdAndDelete(id);
-
-    // Удаляем пост из сохранённых у пользователей
     await User.updateMany(
       { savedPosts: id },
       { $pull: { savedPosts: id } }
     );
 
     res.status(200).json({ message: "Post deleted successfully" });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+/**
+ * Фикс URL для существующих постов
+ */
+export const fixImageUrls = async (req, res) => {
+  try {
+    const posts = await Post.find();
+    
+    for (const post of posts) {
+      if (post.picturePath && !post.picturePath.startsWith('http')) {
+        post.picturePath = `${req.protocol}://${req.get('host')}/assets/${post.picturePath}`;
+      }
+      if (post.userPicturePath && !post.userPicturePath.startsWith('http')) {
+        post.userPicturePath = `${req.protocol}://${req.get('host')}/assets/${post.userPicturePath}`;
+      }
+      await post.save();
+    }
+    
+    res.json({ message: "Image URLs fixed successfully", fixedCount: posts.length });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

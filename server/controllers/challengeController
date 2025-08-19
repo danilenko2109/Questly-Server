@@ -1,0 +1,68 @@
+
+import Challenge from "../models/Challenge.js";
+import UserChallenge from "../models/UserChallenge.js";
+
+export const createCustomChallenge = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const existing = await Challenge.find({ creator: userId, isCustom: true });
+    if (existing.length >= 5) return res.status(400).json({ msg: "Лимит 5 челленджей достигнут" });
+
+    const { title, goal, progressType } = req.body;
+
+    if (title.length < 3) return res.status(400).json({ msg: "Минимум 3 символа в названии" });
+    if (progressType === "incremental" && goal > 1000)
+      return res.status(400).json({ msg: "Максимальная цель — 1000" });
+
+    const challenge = new Challenge({
+      ...req.body,
+      creator: userId,
+      isCustom: true,
+    });
+    await challenge.save();
+    res.status(201).json(challenge);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const getUserCreatedChallenges = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const challenges = await Challenge.find({ creator: userId, isCustom: true });
+    res.status(200).json(challenges);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const updateChallenge = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const challenge = await Challenge.findById(id);
+    if (!challenge) return res.status(404).json({ msg: "Челлендж не найден" });
+    if (challenge.creator.toString() !== req.user.id)
+      return res.status(403).json({ msg: "Нет доступа" });
+
+    Object.assign(challenge, req.body);
+    await challenge.save();
+    res.status(200).json(challenge);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const deleteChallenge = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const challenge = await Challenge.findById(id);
+    if (!challenge) return res.status(404).json({ msg: "Челлендж не найден" });
+    if (challenge.creator.toString() !== req.user.id)
+      return res.status(403).json({ msg: "Нет доступа" });
+
+    await challenge.deleteOne();
+    res.status(200).json({ msg: "Удалено" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};

@@ -137,3 +137,6 @@ mongoose.connect(MONGODB_URI)
 .catch((error) => {
   console.error("MongoDB connection error:", error);
 });
+
+
+export default app;

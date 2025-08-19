@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: questly-server
+    env: node
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: MONGO_URL
+        value: mongodb+srv://bohdandanilenko:18081980@dan.1wggmpv.mongodb.net/?retryWrites=true&w=majority
+      - key: JWT_SECRET
+        value: mySuperSecretKey123
+      - key: PORT
+        value: 10000
